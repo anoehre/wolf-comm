@@ -155,7 +155,7 @@ class WolfClient:
                 "api/portal/GetSystemListByUserPaged",
                 params={PAGE_INDEX: page_index, PAGE_SIZE: SYSTEM_LIST_PAGE_SIZE},
             )
-            items = page[ITEMS]
+            items = WolfClient._check_system_page(page)
             systems.extend(items)
             # an empty page ends the loop even if TotalCount is never reached
             if not items or len(systems) >= page[TOTAL_COUNT]:
@@ -164,7 +164,34 @@ class WolfClient:
 
     # api/portal/GetSystemList (legacy, returns at most 10 systems)
     async def __fetch_system_list_legacy(self) -> list[dict]:
-        return await self.__request("get", "api/portal/GetSystemList")
+        system_list = await self.__request("get", "api/portal/GetSystemList")
+        if not isinstance(system_list, list) or not all(isinstance(s, dict) for s in system_list):
+            raise FetchFailed(
+                f"unexpected GetSystemList response: {WolfClient._describe(system_list)}"
+            )
+        return system_list
+
+    @staticmethod
+    def _describe(data) -> str:
+        # type and field names only, never values (they may contain customer data)
+        if isinstance(data, dict):
+            return f"dict with keys {sorted(data)}"
+        if isinstance(data, list):
+            return f"list of {sorted({type(x).__name__ for x in data})}"
+        return type(data).__name__
+
+    @staticmethod
+    def _check_system_page(page) -> list[dict]:
+        if (
+            not isinstance(page, dict)
+            or not isinstance(page.get(ITEMS), list)
+            or not isinstance(page.get(TOTAL_COUNT), int)
+            or not all(isinstance(i, dict) for i in page[ITEMS])
+        ):
+            raise ValueError(
+                f"unexpected GetSystemListByUserPaged response: {WolfClient._describe(page)}"
+            )
+        return page[ITEMS]
 
     async def fetch_system_list(self) -> list[Device]:
         # GetSystemList only returns the first 10 systems. The paged endpoint

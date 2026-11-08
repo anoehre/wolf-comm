@@ -475,6 +475,28 @@ async def test_fetch_system_list_falls_back_on_unexpected_shape():
     assert http.request.call_args.args[1].endswith("api/portal/GetSystemList")
 
 
+async def test_fetch_system_list_falls_back_when_items_are_not_objects():
+    # Items as dict/strings must not be iterated as if they were systems
+    wc, http = make_authorized_client(
+        ok({"Items": {"Id": 1}, "TotalCount": 1}),
+        ok([system(5)]),
+    )
+    devices = await wc.fetch_system_list()
+    assert [d.id for d in devices] == [5]
+
+
+async def test_fetch_system_list_raises_fetch_failed_when_both_endpoints_misbehave():
+    wc, _ = make_authorized_client(
+        ok({"unexpected": True}),
+        ok({"Message": "error"}),
+    )
+    with pytest.raises(FetchFailed) as exc_info:
+        await wc.fetch_system_list()
+    # only field names are reported, no values
+    assert "Message" in str(exc_info.value)
+    assert "error" not in str(exc_info.value).replace("unexpected GetSystemList response", "")
+
+
 async def test_fetch_system_list_falls_back_when_later_page_fails():
     # a failure after the first page discards the partial result
     wc, http = make_authorized_client(
