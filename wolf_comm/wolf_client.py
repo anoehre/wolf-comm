@@ -242,6 +242,13 @@ class WolfClient:
             "get", "api/portal/GetGuiDescriptionForGateway", params=payload
         )
         _LOGGER.debug("Fetched parameters: %s", desc)
+        if not isinstance(desc, dict) or not isinstance(desc.get(MENU_ITEMS), list):
+            error = {k: desc[k] for k in (ERROR_CODE, ERROR_TYPE, ERROR_MESSAGE)
+                     if isinstance(desc, dict) and k in desc}
+            raise FetchFailed(
+                f"unexpected GetGuiDescriptionForGateway response: "
+                f"{WolfClient._describe(desc)} {error or ''}".strip()
+            )
         if self.expert_mode:
             descriptors = WolfClient._extract_parameter_descriptors(desc)
             _LOGGER.debug("Found parameter descriptors: %s", len(descriptors))

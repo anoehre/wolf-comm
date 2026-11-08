@@ -933,3 +933,14 @@ def test_heatpump_has_heatpump_specific_units(heatpump_desc):
     units = {d["Unit"] for d in descriptors if "Unit" in d}
     assert {"kWh", "kW", "U/min"} <= units
     assert "Hz" not in units
+
+
+async def test_fetch_parameters_reports_error_response():
+    wc, _ = make_authorized_client(
+        ok({"ErrorCode": 7, "Message": "demo message", "MessageParams": ["secret-value"]})
+    )
+    prepare_for_fetch_parameters(wc, {})
+    with pytest.raises(FetchFailed) as exc_info:
+        await wc.fetch_parameters(7, 5)
+    assert "demo message" in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
