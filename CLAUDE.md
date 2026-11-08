@@ -76,7 +76,7 @@ TokenAuth.token() ──► Tokens (access_token, expire_date)
 create_session() ──► BrowserSessionId  (refreshed every 60s by update_session())
         │
         ▼
-GetSystemList ──► Device(id, gateway, name)
+GetSystemListByUserPaged ──► Device(id, gateway, name)
         │
         ▼
 GetGuiDescriptionForGateway ──► huge nested MenuItems/TabViews/ParameterDescriptors tree
@@ -161,7 +161,7 @@ WolfClient(username, password, expert_p=None, region=None, client=None, client_l
 ### Public API
 | Method | HTTP call | Returns |
 |---|---|---|
-| `fetch_system_list()` | `GET api/portal/GetSystemList` | `list[Device]` |
+| `fetch_system_list()` | `GET api/portal/GetSystemListByUserPaged` (all pages, 10 per page; falls back to `GET api/portal/GetSystemList`, which returns only the first 10 systems) | `list[Device]` |
 | `fetch_system_state_list(system_id, gateway_id, system_share_id=None)` | `POST api/portal/GetSystemStateList` | `bool` (`[0].GatewayState.IsOnline`) |
 | `fetch_parameters(gateway_id, system_id)` | `GET api/portal/GetGuiDescriptionForGateway` | `list[Parameter]` |
 | `fetch_value(gateway_id, system_id, parameters)` | `POST api/portal/GetParameterValues` (batched per bundle) | `list[Value]` |

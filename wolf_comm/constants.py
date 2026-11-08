@@ -33,6 +33,15 @@ SYSTEM_ID = 'SystemId'
 # payload for them, null/absent for systems the user owns
 SYSTEM_SHARE_ID = 'SystemShareId'
 
+# GetSystemListByUserPaged request params / response fields
+PAGE_INDEX = 'pageIndex'
+
+PAGE_SIZE = 'pageSize'
+
+ITEMS = 'Items'
+
+TOTAL_COUNT = 'TotalCount'
+
 TAB_VIEWS = 'TabViews'
 
 MENU_ITEMS = 'MenuItems'

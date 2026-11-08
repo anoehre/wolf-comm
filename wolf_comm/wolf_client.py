@@ -12,7 +12,8 @@ from wolf_comm.constants import BASE_URL, BASE_URL_PORTAL, ID, GATEWAY_ID, NAME,
     BUNDLE, VALUE_ID_LIST, GUI_ID_CHANGED, SESSION_ID, VALUE_ID, GROUP, VALUE, STATE, VALUES, PARAMETER_ID, UNIT, \
     CELSIUS_TEMPERATURE, BAR, RPM, FLOW, FREQUENCY, PERCENTAGE, LIST_ITEMS, DISPLAY_TEXT, PARAMETER_DESCRIPTORS, TAB_NAME, HOUR, KILOWATT, KILOWATTHOURS, \
     WATTHOURS_KILOWATTHOURS, WATTHOURS_KILOWATTHOURS_MEGAWATTHOURS, \
-    LAST_ACCESS, ERROR_CODE, ERROR_TYPE, ERROR_MESSAGE, ERROR_READ_PARAMETER, SYSTEM_LIST, SYSTEM_SHARE_ID, GATEWAY_STATE, IS_ONLINE, WRITE_PARAMETER_VALUES, ISREADONLY
+    LAST_ACCESS, ERROR_CODE, ERROR_TYPE, ERROR_MESSAGE, ERROR_READ_PARAMETER, SYSTEM_LIST, SYSTEM_SHARE_ID, GATEWAY_STATE, IS_ONLINE, WRITE_PARAMETER_VALUES, ISREADONLY, \
+    PAGE_INDEX, PAGE_SIZE, ITEMS, TOTAL_COUNT
 from wolf_comm.create_session import create_session, update_session
 from wolf_comm.helpers import bearer_header
 from wolf_comm.models import Temperature, Parameter, SimpleParameter, Device, Pressure, ListItemParameter, \
@@ -23,6 +24,8 @@ from wolf_comm.token_auth import Tokens, TokenAuth
 _LOGGER = logging.getLogger(__name__)
 SPLIT = "---"
 RETRY_STATUS_CODES = {401, 500}
+# the server caps GetSystemListByUserPaged at 10 items per page, whatever is requested
+SYSTEM_LIST_PAGE_SIZE = 10
 
 
 class WolfClient:
@@ -142,9 +145,41 @@ class WolfClient:
             seconds=60
         )
 
-    # api/portal/GetSystemList
+    # api/portal/GetSystemListByUserPaged?pageIndex={n}&pageSize=10
+    async def __fetch_system_list_paged(self) -> list[dict]:
+        systems: list[dict] = []
+        page_index = 0
+        while True:
+            page = await self.__request(
+                "get",
+                "api/portal/GetSystemListByUserPaged",
+                params={PAGE_INDEX: page_index, PAGE_SIZE: SYSTEM_LIST_PAGE_SIZE},
+            )
+            items = page[ITEMS]
+            systems.extend(items)
+            # an empty page ends the loop even if TotalCount is never reached
+            if not items or len(systems) >= page[TOTAL_COUNT]:
+                return systems
+            page_index += 1
+
+    # api/portal/GetSystemList (legacy, returns at most 10 systems)
+    async def __fetch_system_list_legacy(self) -> list[dict]:
+        return await self.__request("get", "api/portal/GetSystemList")
+
     async def fetch_system_list(self) -> list[Device]:
-        system_list = await self.__request("get", "api/portal/GetSystemList")
+        # GetSystemList only returns the first 10 systems. The paged endpoint
+        # (the one the web portal uses) returns all of them; the server
+        # ignores page sizes above 10. Fall back to the legacy endpoint if the
+        # paged one fails or answers in an unexpected shape.
+        try:
+            system_list = await self.__fetch_system_list_paged()
+        except (FetchFailed, KeyError, TypeError, ValueError) as err:
+            _LOGGER.warning(
+                "Paged system list failed (%s: %s), falling back to GetSystemList",
+                type(err).__name__,
+                err,
+            )
+            system_list = await self.__fetch_system_list_legacy()
         _LOGGER.debug("Fetched systems: %s", system_list)
         return [
             Device(system[ID], system[GATEWAY_ID], system[NAME], system.get(SYSTEM_SHARE_ID))

@@ -393,27 +393,98 @@ async def test_load_localized_json_parses_in_executor():
     assert wc.regional == {"Heizung": "Heating"}
 
 
+def paged(items, total):
+    return ok({"Items": items, "TotalCount": total})
+
+
+def system(system_id, **extra):
+    return {"Id": system_id, "GatewayId": system_id + 1000, "Name": f"Sys{system_id}", **extra}
+
+
 async def test_fetch_system_list():
-    wc, http = make_authorized_client(
-        ok([{"Id": 5, "GatewayId": 7, "Name": "Home"}])
-    )
+    wc, http = make_authorized_client(paged([system(5)], 1))
     devices = await wc.fetch_system_list()
     assert len(devices) == 1
-    assert (devices[0].id, devices[0].gateway, devices[0].name) == (5, 7, "Home")
+    assert (devices[0].id, devices[0].gateway, devices[0].name) == (5, 1005, "Sys5")
     # owned system: no SystemShareId in the response
     assert devices[0].system_share_id is None
     method, url = http.request.call_args.args[:2]
     assert method == "get"
-    assert url.endswith("api/portal/GetSystemList")
+    assert url.endswith("api/portal/GetSystemListByUserPaged")
+    assert http.request.call_args.kwargs["params"] == {"pageIndex": 0, "pageSize": 10}
 
 
 async def test_fetch_system_list_captures_system_share_id():
     # shared/foreign systems carry a SystemShareId that must be retained
     wc, _ = make_authorized_client(
-        ok([{"Id": 23484, "GatewayId": 18216, "Name": "Shared", "SystemShareId": 63840}])
+        paged([system(23484, SystemShareId=63840)], 1)
     )
     devices = await wc.fetch_system_list()
     assert devices[0].system_share_id == 63840
+
+
+async def test_fetch_system_list_reads_all_pages():
+    wc, http = make_authorized_client(
+        paged([system(i) for i in range(1, 11)], 25),
+        paged([system(i) for i in range(11, 21)], 25),
+        paged([system(i) for i in range(21, 26)], 25),
+    )
+    devices = await wc.fetch_system_list()
+    assert [d.id for d in devices] == list(range(1, 26))
+    assert http.request.call_count == 3
+    page_indexes = [c.kwargs["params"]["pageIndex"] for c in http.request.call_args_list]
+    assert page_indexes == [0, 1, 2]
+
+
+async def test_fetch_system_list_stops_on_empty_page():
+    # TotalCount larger than what the server delivers must not loop forever
+    wc, http = make_authorized_client(
+        paged([system(1), system(2)], 50),
+        paged([], 50),
+    )
+    devices = await wc.fetch_system_list()
+    assert [d.id for d in devices] == [1, 2]
+    assert http.request.call_count == 2
+
+
+async def test_fetch_system_list_empty():
+    wc, http = make_authorized_client(paged([], 0))
+    assert await wc.fetch_system_list() == []
+    assert http.request.call_count == 1
+
+
+async def test_fetch_system_list_falls_back_when_paged_request_fails():
+    wc, http = make_authorized_client(
+        httpx.Response(500, json={}),
+        httpx.Response(500, json={}),
+        ok([system(5)]),
+    )
+    wc._WolfClient__authorize_and_session = AsyncMock()
+    devices = await wc.fetch_system_list()
+    assert [d.id for d in devices] == [5]
+    assert http.request.call_args.args[1].endswith("api/portal/GetSystemList")
+
+
+async def test_fetch_system_list_falls_back_on_unexpected_shape():
+    wc, http = make_authorized_client(
+        ok({"unexpected": True}),
+        ok([system(5)]),
+    )
+    devices = await wc.fetch_system_list()
+    assert [d.id for d in devices] == [5]
+    assert http.request.call_args.args[1].endswith("api/portal/GetSystemList")
+
+
+async def test_fetch_system_list_falls_back_when_later_page_fails():
+    # a failure after the first page discards the partial result
+    wc, http = make_authorized_client(
+        paged([system(i) for i in range(1, 11)], 20),
+        ok({"unexpected": True}),
+        ok([system(i) for i in range(1, 11)]),
+    )
+    devices = await wc.fetch_system_list()
+    assert len(devices) == 10
+    assert http.request.call_count == 3
 
 
 async def test_fetch_system_state_list():
@@ -560,16 +631,16 @@ async def test_write_value_raises_write_failed_on_other_errors():
 async def test_request_retries_once_on_500():
     wc, http = make_authorized_client(
         httpx.Response(500, json={"error": "server"}),
-        ok([{"Id": 1, "GatewayId": 2, "Name": "Home"}]),
+        ok([{"GatewayState": {"IsOnline": True}}]),
     )
     # Avoid the real re-auth flow on retry.
     wc._WolfClient__authorize_and_session = AsyncMock()
 
-    devices = await wc.fetch_system_list()
+    online = await wc.fetch_system_state_list(1, 2)
 
     assert http.request.call_count == 2
     wc._WolfClient__authorize_and_session.assert_awaited_once()
-    assert devices[0].name == "Home"
+    assert online is True
     assert wc.last_failed is False
 
 
@@ -581,7 +652,7 @@ async def test_request_raises_fetch_failed_when_retry_also_fails():
     wc._WolfClient__authorize_and_session = AsyncMock()
 
     with pytest.raises(FetchFailed) as exc_info:
-        await wc.fetch_system_list()
+        await wc.fetch_system_state_list(1, 2)
 
     # exactly one retry, then give up — the error body must not be returned
     # to the caller as if it were data, but it IS preserved on the exception
@@ -598,7 +669,7 @@ async def test_request_retry_uses_fresh_token_after_reauth():
 
     wc, http = make_authorized_client(
         httpx.Response(401, json={}),
-        ok([{"Id": 1, "GatewayId": 2, "Name": "Home"}]),
+        ok([{"GatewayState": {"IsOnline": True}}]),
     )
 
     async def reauth():
@@ -607,7 +678,7 @@ async def test_request_retry_uses_fresh_token_after_reauth():
 
     wc._WolfClient__authorize_and_session = AsyncMock(side_effect=reauth)
 
-    await wc.fetch_system_list()
+    await wc.fetch_system_state_list(1, 2)
 
     first_headers = http.request.call_args_list[0].kwargs["headers"]
     retry_headers = http.request.call_args_list[1].kwargs["headers"]
