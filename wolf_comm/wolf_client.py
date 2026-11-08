@@ -14,7 +14,7 @@ from wolf_comm.constants import BASE_URL, BASE_URL_PORTAL, ID, GATEWAY_ID, NAME,
     WATTHOURS_KILOWATTHOURS, WATTHOURS_KILOWATTHOURS_MEGAWATTHOURS, \
     LAST_ACCESS, ERROR_CODE, ERROR_TYPE, ERROR_MESSAGE, ERROR_READ_PARAMETER, SYSTEM_LIST, SYSTEM_SHARE_ID, GATEWAY_STATE, IS_ONLINE, WRITE_PARAMETER_VALUES, ISREADONLY, \
     PAGE_INDEX, PAGE_SIZE, ITEMS, TOTAL_COUNT
-from wolf_comm.create_session import create_session, update_session
+from wolf_comm.create_session import create_session, update_session, CreateSessionFailed
 from wolf_comm.helpers import bearer_header
 from wolf_comm.models import Temperature, Parameter, SimpleParameter, Device, Pressure, ListItemParameter, \
     PercentageParameter, Value, ListItem, HoursParameter, PowerParameter, EnergyParameter, EnergyWhParameter, \
@@ -140,7 +140,10 @@ class WolfClient:
 
     async def __authorize_and_session(self):
         self.tokens = await self.token_auth.token(self.client)
-        self.session_id = await create_session(self.client, self.tokens.access_token)
+        try:
+            self.session_id = await create_session(self.client, self.tokens.access_token)
+        except CreateSessionFailed as err:
+            raise FetchFailed(str(err), err.response) from err
         self.last_session_refesh = datetime.datetime.now() + datetime.timedelta(
             seconds=60
         )
@@ -166,8 +169,10 @@ class WolfClient:
     async def __fetch_system_list_legacy(self) -> list[dict]:
         system_list = await self.__request("get", "api/portal/GetSystemList")
         if not isinstance(system_list, list) or not all(isinstance(s, dict) for s in system_list):
+            error = {k: system_list[k] for k in (ERROR_CODE, ERROR_TYPE, ERROR_MESSAGE)
+                     if isinstance(system_list, dict) and k in system_list}
             raise FetchFailed(
-                f"unexpected GetSystemList response: {WolfClient._describe(system_list)}"
+                f"unexpected GetSystemList response: {WolfClient._describe(system_list)} {error or ''}".strip()
             )
         return system_list
 

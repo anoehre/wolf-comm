@@ -488,13 +488,13 @@ async def test_fetch_system_list_falls_back_when_items_are_not_objects():
 async def test_fetch_system_list_raises_fetch_failed_when_both_endpoints_misbehave():
     wc, _ = make_authorized_client(
         ok({"unexpected": True}),
-        ok({"Message": "error"}),
+        ok({"ErrorCode": 7, "Message": "demo message", "MessageParams": ["secret-value"]}),
     )
     with pytest.raises(FetchFailed) as exc_info:
         await wc.fetch_system_list()
-    # only field names are reported, no values
-    assert "Message" in str(exc_info.value)
-    assert "error" not in str(exc_info.value).replace("unexpected GetSystemList response", "")
+    # error code/message are reported, MessageParams (may hold values) are not
+    assert "demo message" in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
 
 
 async def test_fetch_system_list_falls_back_when_later_page_fails():

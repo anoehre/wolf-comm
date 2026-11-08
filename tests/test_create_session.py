@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock
 
 import httpx
 
-from wolf_comm.create_session import create_session, update_session
+import pytest
+
+from wolf_comm.create_session import CreateSessionFailed, create_session, update_session
 
 
 async def test_create_session_returns_browser_session_id():
@@ -40,3 +42,15 @@ async def test_update_session_posts_session_id():
     kwargs = http.post.call_args.kwargs
     assert kwargs["headers"]["Authorization"] == "Bearer test-token"
     assert kwargs["json"] == {"SessionId": 17}
+
+
+async def test_create_session_error_response_names_error_but_not_params():
+    http = AsyncMock()
+    http.post = AsyncMock(return_value=httpx.Response(200, json={
+        "ErrorCode": 7, "ErrorType": "Demo", "Message": "demo message",
+        "MessageParams": ["secret-value"],
+    }))
+    with pytest.raises(CreateSessionFailed) as exc_info:
+        await create_session(http, "test-token")
+    assert "demo message" in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
