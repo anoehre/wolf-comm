@@ -232,6 +232,18 @@ class WolfClient:
             "post", "api/portal/GetSystemStateList", json=payload
         )
         _LOGGER.debug("Fetched system state: %s", system_state_response)
+        if (
+            not isinstance(system_state_response, list)
+            or not system_state_response
+            or not isinstance(system_state_response[0], dict)
+            or GATEWAY_STATE not in system_state_response[0]
+        ):
+            error = {k: system_state_response[k] for k in (ERROR_CODE, ERROR_TYPE, ERROR_MESSAGE)
+                     if isinstance(system_state_response, dict) and k in system_state_response}
+            raise FetchFailed(
+                f"unexpected GetSystemStateList response: "
+                f"{WolfClient._describe(system_state_response)} {error or ''}".strip()
+            )
         return system_state_response[0][GATEWAY_STATE][IS_ONLINE]
 
     # api/portal/GetGuiDescriptionForGateway?GatewayId={gateway_id}&SystemId={system_id}

@@ -944,3 +944,13 @@ async def test_fetch_parameters_reports_error_response():
         await wc.fetch_parameters(7, 5)
     assert "demo message" in str(exc_info.value)
     assert "secret-value" not in str(exc_info.value)
+
+
+async def test_fetch_system_state_list_reports_error_response():
+    wc, _ = make_authorized_client(
+        ok({"ErrorCode": 7, "Message": "demo message", "MessageParams": ["secret-value"]})
+    )
+    with pytest.raises(FetchFailed) as exc_info:
+        await wc.fetch_system_state_list(5, 7)
+    assert "demo message" in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
