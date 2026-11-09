@@ -954,3 +954,14 @@ async def test_fetch_system_state_list_reports_error_response():
         await wc.fetch_system_state_list(5, 7)
     assert "demo message" in str(exc_info.value)
     assert "secret-value" not in str(exc_info.value)
+
+
+async def test_http_requests_are_logged_without_query_or_body(caplog):
+    import logging
+
+    wc, _ = make_authorized_client(ok([{"GatewayState": {"IsOnline": True}}]))
+    with caplog.at_level(logging.DEBUG, logger="wolf_comm.http"):
+        await wc.fetch_system_state_list(5, 7)
+    lines = [r.getMessage() for r in caplog.records if r.name == "wolf_comm.http"]
+    assert any("post api/portal/GetSystemStateList -> 200" in line for line in lines)
+    assert not any("GatewayState" in line for line in lines)

@@ -3,6 +3,7 @@ import datetime
 import json
 import logging
 import re
+import time
 from typing import Union, Optional
 
 import httpx
@@ -22,6 +23,9 @@ from wolf_comm.models import Temperature, Parameter, SimpleParameter, Device, Pr
 from wolf_comm.token_auth import Tokens, TokenAuth
 
 _LOGGER = logging.getLogger(__name__)
+# one line per HTTP request (method, path, status, duration), no bodies and no
+# query strings; enable with `wolf_comm.http: debug` to diagnose portal errors
+_HTTP_LOGGER = logging.getLogger("wolf_comm.http")
 SPLIT = "---"
 RETRY_STATUS_CODES = {401, 500}
 # the server caps GetSystemListByUserPaged at 10 items per page, whatever is requested
@@ -132,11 +136,31 @@ class WolfClient:
         return resp.json()
 
     async def __execute(self, headers, kwargs, method, path):
-        return await self.client.request(
+        if _HTTP_LOGGER.isEnabledFor(logging.DEBUG):
+            if not getattr(self, "_http_client_logged", False):
+                self._http_client_logged = True
+                client = self.client
+                _HTTP_LOGGER.debug(
+                    "http client: %s.%s, user-agent: %s",
+                    type(client).__module__,
+                    type(client).__name__,
+                    getattr(getattr(client, "headers", None), "get", lambda _k: None)("user-agent"),
+                )
+        started = time.monotonic()
+        resp = await self.client.request(
             method,
             f"{BASE_URL_PORTAL}/{path}",
             **dict(kwargs, headers=Headers(headers)),
         )
+        _HTTP_LOGGER.debug(
+            "%s %s -> %s (%s) in %.2fs",
+            method,
+            path,
+            resp.status_code,
+            getattr(resp, "http_version", "?"),
+            time.monotonic() - started,
+        )
+        return resp
 
     async def __authorize_and_session(self):
         self.tokens = await self.token_auth.token(self.client)
